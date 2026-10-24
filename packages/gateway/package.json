@@ -1,0 +1,13 @@
+{
+  "name": "@ever/gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/local.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ever/core": "workspace:*"
+  }
+}

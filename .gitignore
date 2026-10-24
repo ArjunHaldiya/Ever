@@ -1,0 +1,63 @@
+# --- Dependencies -----------------------------------------------------------
+node_modules/
+.pnpm-store/
+.pnp.*
+
+# --- Build output -----------------------------------------------------------
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.vite/
+.turbo/
+
+# --- AWS CDK ----------------------------------------------------------------
+cdk.out/
+# Lookup cache; can contain account IDs
+cdk.context.json
+
+# --- Secrets and credentials (NEVER commit) ---------------------------------
+.env
+.env.*
+!.env.example
+# Photon credentials file used with `aws secretsmanager put-secret-value`
+photon.json
+secrets/
+*.pem
+*.key
+*.p12
+.aws/
+credentials
+# Terraform/other local state, in case it appears
+*.tfstate*
+
+# --- Real data for the demo (keep placeholders in the committed files) ------
+# Real team phone numbers for the warning demo
+seed/*.local.json
+*.local.json
+
+# --- Logs and debug output --------------------------------------------------
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- OS and editors ---------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# --- Claude Code local state ------------------------------------------------
+.claude/settings.local.json
+.claude/scratch/
+
+# --- Scratch -----------------------------------------------------------------
+tmp/
+.tmp/
+*.bak

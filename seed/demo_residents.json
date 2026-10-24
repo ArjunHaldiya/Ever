@@ -1,0 +1,20 @@
+{
+  "_notice": "PLACEHOLDERS ONLY (555-01xx numbers are fictional). Put real team phone numbers in seed/demo_residents.local.json (gitignored), same shape. Never commit real numbers.",
+  "residents": [
+    {
+      "handle": "+15555550101",
+      "zip": "95112",
+      "needType": "refrigeration"
+    },
+    {
+      "handle": "+15555550102",
+      "zip": "95112",
+      "needType": "device_power"
+    },
+    {
+      "handle": "+15555550103",
+      "zip": "95116",
+      "needType": "refrigeration"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "ever",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:gateway": "pnpm --filter @ever/gateway dev",
+    "dev:dashboard": "pnpm --filter @ever/dashboard dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json && pnpm -r --if-present typecheck",
+    "cdk": "pnpm --filter @ever/infra exec cdk",
+    "seed": "tsx seed/seed.ts",
+    "demo:reset": "tsx scripts/reset-demo.ts",
+    "demo:shutoff": "tsx scripts/trigger-shutoff.ts",
+    "demo:chaos": "tsx scripts/toggle-chaos.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

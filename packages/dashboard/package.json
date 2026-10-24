@@ -1,0 +1,12 @@
+{
+  "name": "@ever/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'dashboard not implemented yet (Phase 6)' && exit 1"
+  },
+  "dependencies": {
+    "@ever/core": "workspace:*"
+  }
+}
