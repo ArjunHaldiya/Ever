@@ -8,7 +8,7 @@ let template: Template;
 beforeAll(() => {
   // Empty list = skip esbuild bundling; these tests only inspect the template.
   const app = new cdk.App({ context: { "aws:cdk:bundling-stacks": [] } });
-  const stack = new AppStack(app, "TestStack", { env: { region: "us-west-2", account: "111111111111" } });
+  const stack = new AppStack(app, "TestStack", { env: { region: "us-east-1", account: "111111111111" } });
   template = Template.fromStack(stack);
 });
 
@@ -125,10 +125,10 @@ describe("secrets and privacy", () => {
 });
 
 describe("worker permissions", () => {
-  it("can use Bedrock, Comprehend PII detection, and the place index", () => {
+  it("can use Bedrock and the place index", () => {
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("bedrock:InvokeModel");
-    expect(policies).toContain("comprehend:DetectPiiEntities");
+    expect(policies).not.toContain("comprehend:");
     expect(policies).toContain("geo:SearchPlaceIndexForText");
   });
 

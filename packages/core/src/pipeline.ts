@@ -1,7 +1,8 @@
+import { z } from "zod";
 import { detectEmergency, emergencyReply } from "./emergency";
-import { extractZip, lookupZip, roundCoord, type ZipCentroids } from "./geo";
+import { extractZip, lookupZip, type ZipCentroids } from "./geo";
+import { ExtractedNeedSchema, ExtractionMetaSchema } from "./schemas";
 import { rankResources, type Match } from "./matcher";
-import { redactPii } from "./pii";
 import { extractLocationText } from "./rulesExtractor";
 import {
   askLocationText,
@@ -9,12 +10,15 @@ import {
   infoText,
   locationNotFoundText,
   noMatchText,
+  type NearbyPlace,
   routedReplyText,
 } from "./templates";
 import type {
   ExtractedNeed,
+  ExtractionMeta,
   LatLng,
   NeedStatus,
+  NeedType,
   ProcessingMode,
   Resource,
 } from "./types";
@@ -26,32 +30,66 @@ import type {
  * extractor first, and handle idempotency, storage and sending.
  */
 
-/** Held between the "what's your ZIP?" question and the answer (Conversations table). */
-export type ConversationState = {
-  needId: string;
-  extracted: ExtractedNeed;
-  /** Already redacted: raw message text is never kept in state. */
-  redactedText: string;
+/**
+ * Held between the "what's your ZIP?" question and the answer (Conversations table, short TTL).
+ * It keeps only what is needed to finish the request: the kind of need and how it was extracted.
+ * No message text and no location (the held `locationText` is cleared before saving).
+ */
+export const ConversationStateSchema = z.object({
+  needId: z.string(),
+  extracted: ExtractedNeedSchema,
+  /** How the original message was extracted, so the Needs row keeps showing Bedrock's work. */
+  extraction: ExtractionMetaSchema,
   /** ISO 8601 */
-  startedAt: string;
+  startedAt: z.string(),
+});
+export type ConversationState = z.infer<typeof ConversationStateSchema>;
+
+/** Used when a caller doesn't say how it extracted (tests, the local loop). */
+export const RULES_EXTRACTION: ExtractionMeta = {
+  extractor: "rules",
+  modelId: null,
+  latencyMs: 0,
+  fallbackReason: null,
 };
+
+/**
+ * Beyond this distance the closest open place is still named (it is the best answer we have),
+ * but the reply first says plainly that nothing is open within this many miles.
+ */
+export const DEFAULT_FAR_MILES = 20;
+
+/**
+ * A confirmed place farther than this is not an answer (it could be another state): the reply
+ * falls back to nearby real places and 211 instead. Roughly a regional drive.
+ */
+export const MAX_USEFUL_MILES = 100;
+
+/** When closer unverified places are listed, a confirmed place is only worth adding if it is within this many miles. */
+export const MAX_CONFIRMED_FAR_WITH_LIST_MILES = 30;
 
 export const CONVERSATION_TTL_MS = 30 * 60 * 1000;
 
-/** Shape of a Needs row, minus createdAt/routedAt which the caller stamps. */
+/**
+ * Shape of a Needs row, minus createdAt/routedAt which the caller stamps.
+ * Data minimization: it deliberately holds no message text, no location, no ZIP and no chosen
+ * place or distance (a place plus a distance is a location in disguise). Only the kind of need
+ * and how the system handled it.
+ */
 export type NeedDraft = {
   id: string;
   tier: ExtractedNeed["tier"];
   needType: ExtractedNeed["needType"];
   language: ExtractedNeed["language"];
   emergency: boolean;
-  latRounded: number | null;
-  lngRounded: number | null;
-  zip: string | null;
   status: NeedStatus;
-  resourceId: string | null;
+  /** How many unverified nearby places the reply listed. */
+  unverifiedShown: number;
   mode: ProcessingMode;
-  redactedText: string;
+  extractor: ExtractionMeta["extractor"];
+  modelId: string | null;
+  latencyMs: number;
+  fallbackReason: ExtractionMeta["fallbackReason"];
 };
 
 export type PipelineDeps = {
@@ -60,11 +98,20 @@ export type PipelineDeps = {
   geocode: (locationText: string) => Promise<LatLng | null>;
   newNeedId: () => string;
   now: Date;
+  /** Overrides DEFAULT_FAR_MILES. */
+  farMiles?: number;
+  /**
+   * Real places near a point when nothing confirmed is in range (e.g. pharmacies from a place
+   * search). Open hours and power are unknown, so replies label them unverified. Errors are ignored.
+   */
+  findNearby?: (needType: NeedType, origin: LatLng) => Promise<NearbyPlace[]>;
 };
 
 export type PipelineInput = {
   text: string;
   extracted: ExtractedNeed;
+  /** How `extracted` was produced. Defaults to the rules extractor. */
+  extraction?: ExtractionMeta;
   mode: ProcessingMode;
   conversation: ConversationState | null;
 };
@@ -76,6 +123,10 @@ export type PipelineResult = {
   /** State to persist; null clears it. */
   conversation: ConversationState | null;
   match: Match | null;
+  /** The threshold, when the match is farther than it; otherwise null. */
+  farMiles: number | null;
+  /** True when the reply is the "no confirmed place in range" answer (template text, not Bedrock-phrased). */
+  areaFallback: boolean;
 };
 
 /** Offline geocoder: only resolves text containing a seeded ZIP. */
@@ -107,11 +158,9 @@ function draftOf(
   fields: {
     status: NeedStatus;
     mode: ProcessingMode;
-    redactedText: string;
-    origin?: LatLng | null;
-    zip?: string | null;
-    resourceId?: string | null;
+    unverifiedShown?: number;
     emergency: boolean;
+    extraction: ExtractionMeta;
   },
 ): NeedDraft {
   return {
@@ -120,13 +169,13 @@ function draftOf(
     needType: extracted.needType,
     language: extracted.language,
     emergency: fields.emergency,
-    latRounded: fields.origin ? roundCoord(fields.origin.lat) : null,
-    lngRounded: fields.origin ? roundCoord(fields.origin.lng) : null,
-    zip: fields.zip ?? null,
     status: fields.status,
-    resourceId: fields.resourceId ?? null,
+    unverifiedShown: fields.unverifiedShown ?? 0,
     mode: fields.mode,
-    redactedText: fields.redactedText,
+    extractor: fields.extraction.extractor,
+    modelId: fields.extraction.modelId,
+    latencyMs: fields.extraction.latencyMs,
+    fallbackReason: fields.extraction.fallbackReason,
   };
 }
 
@@ -148,67 +197,105 @@ export async function processMessage(
 
   const extracted = answeringLocation ? held.extracted : input.extracted;
   const needId = answeringLocation ? held.needId : deps.newNeedId();
-  const redactedText = answeringLocation ? held.redactedText : redactPii(text);
+  const extraction = answeringLocation
+    ? held.extraction
+    : (input.extraction ?? RULES_EXTRACTION);
+  const language = extracted.language;
   const locationText = input.extracted.locationText ?? extractLocationText(text);
-  const base = { mode, redactedText, emergency };
+  const base = { mode, emergency, extraction };
 
   // Nothing actionable: ask what they need (but never bury the 911 line).
   if (!answeringLocation && extracted.needType === "info") {
     if (!emergency) {
-      replies.push(extracted.confidence < 0.5 ? clarifyNeedText() : infoText());
+      replies.push(
+        extracted.confidence < 0.5 ? clarifyNeedText(language) : infoText(language),
+      );
     }
     return {
       replies,
       need: draftOf(needId, extracted, { ...base, status: "new" }),
       conversation: null,
       match: null,
+      farMiles: null,
+      areaFallback: false,
     };
   }
 
   const origin = locationText ? await safeGeocode(deps.geocode, locationText) : null;
-  const zip = locationText ? extractZip(locationText) : null;
 
   if (!origin) {
     // FR-4: ask once, then hold state. Later failed answers get a nudge, not the same question.
     replies.push(
-      answeringLocation || locationText ? locationNotFoundText() : askLocationText(),
+      answeringLocation || locationText
+        ? locationNotFoundText(language)
+        : askLocationText(language),
     );
     return {
       replies,
       need: draftOf(needId, extracted, { ...base, status: "awaiting_location" }),
       conversation: {
         needId,
-        extracted,
-        redactedText,
+        // The place they mentioned is not kept, even in this short-lived state.
+        extracted: { ...extracted, locationText: null },
+        extraction,
         startedAt: held && answeringLocation ? held.startedAt : deps.now.toISOString(),
       },
       match: null,
+      farMiles: null,
+      areaFallback: false,
     };
   }
 
-  const match =
+  const closest =
     rankResources({
       needType: extracted.needType,
       origin,
       resources: deps.resources,
       now: deps.now,
     })[0] ?? null;
+  const match = closest && closest.distanceMiles <= MAX_USEFUL_MILES ? closest : null;
+  const threshold = deps.farMiles ?? DEFAULT_FAR_MILES;
+  const farMiles = match && match.distanceMiles > threshold ? threshold : null;
+
+  // Nothing confirmed in range: look for real (unverified) places nearby before falling back to 211.
+  let nearby: NearbyPlace[] = [];
+  if ((!match || farMiles !== null) && deps.findNearby) {
+    nearby = await deps.findNearby(extracted.needType, origin).catch(() => []);
+  }
+  // A far confirmed answer stands on its own unless we also have closer unverified places to list.
+  const areaFallback = !match || (farMiles !== null && nearby.length > 0);
 
   replies.push(
-    match
-      ? routedReplyText({ match, needType: extracted.needType, tier: extracted.tier, mode })
-      : noMatchText({ tier: extracted.tier, mode }),
+    areaFallback
+      ? noMatchText({
+          tier: extracted.tier,
+          mode,
+          language,
+          needType: extracted.needType,
+          miles: threshold,
+          places: nearby,
+          ...(match && (nearby.length === 0 || match.distanceMiles <= MAX_CONFIRMED_FAR_WITH_LIST_MILES)
+            ? { confirmedFar: match }
+            : {}),
+        })
+      : routedReplyText({
+          match: match!,
+          needType: extracted.needType,
+          tier: extracted.tier,
+          mode,
+          ...(farMiles === null ? {} : { farMiles }),
+        }),
   );
   return {
     replies,
     need: draftOf(needId, extracted, {
       ...base,
-      origin,
-      zip,
-      status: match ? "routed" : "new",
-      resourceId: match?.resource.id ?? null,
+      status: match && !areaFallback ? "routed" : "new",
+      unverifiedShown: nearby.length,
     }),
     conversation: null,
     match,
+    farMiles,
+    areaFallback,
   };
 }

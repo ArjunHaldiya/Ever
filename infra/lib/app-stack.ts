@@ -192,10 +192,6 @@ export class AppStack extends cdk.Stack {
         ],
       }),
     );
-    // Comprehend PII detection has no resource-level permissions.
-    worker.addToRolePolicy(
-      new iam.PolicyStatement({ actions: ["comprehend:DetectPiiEntities"], resources: ["*"] }),
-    );
     worker.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["geo:SearchPlaceIndexForText"],

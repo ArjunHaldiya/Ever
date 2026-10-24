@@ -53,6 +53,7 @@ Thumbs.db
 *.swp
 *~
 
+docs/
 # --- Claude Code local state ------------------------------------------------
 .claude/settings.local.json
 .claude/scratch/
@@ -61,3 +62,11 @@ Thumbs.db
 tmp/
 .tmp/
 *.bak
+
+# Rendered startup scripts (contain account-specific values)
+*.rendered.sh
+*.rendered.json
+
+# generated/large map assets for the dashboard
+packages/dashboard/public/vendor/
+packages/dashboard/public/tiles/

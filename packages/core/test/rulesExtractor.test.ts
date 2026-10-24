@@ -99,3 +99,21 @@ describe("extractLocationText", () => {
     expect(extractNeedByRules("need food").locationText).toBeNull();
   });
 });
+
+describe("extractLocationText keeps the city so it works anywhere in the US", () => {
+  it("keeps a trailing city after cross streets", () => {
+    expect(extractLocationText("my phone died, I'm at Market St and Van Ness Ave, San Francisco")).toBe(
+      "Market St and Van Ness Ave, San Francisco",
+    );
+  });
+
+  it("keeps a trailing city and state after a street address", () => {
+    expect(extractLocationText("I'm at 123 Main St, Austin, TX and need food")).toBe("123 Main St, Austin, TX");
+    expect(extractLocationText("need a pharmacy at 500 Congress Ave, Austin TX")).toBe("500 Congress Ave, Austin TX");
+  });
+
+  it("does not invent a city when there isn't one", () => {
+    expect(extractLocationText("I'm at 123 Main St and need food")).toBe("123 Main St");
+    expect(extractLocationText("corner of Story Rd and King Rd please")).toBe("Story Rd and King Rd");
+  });
+});

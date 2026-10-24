@@ -5,9 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/local.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "photon:check": "tsx --env-file=../../.env.local src/photon-check.ts",
+    "start": "tsx --env-file=../../.env.local src/index.ts"
   },
   "dependencies": {
-    "@ever/core": "workspace:*"
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/client-secrets-manager": "^3.1156.0",
+    "@aws-sdk/client-sqs": "^3.1156.0",
+    "@aws-sdk/lib-dynamodb": "^3.1156.0",
+    "@ever/core": "workspace:*",
+    "@spectrum-ts/core": "^12.14.0",
+    "@spectrum-ts/imessage": "^12.14.0",
+    "zod": "^3.25.76"
   }
 }

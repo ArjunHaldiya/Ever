@@ -13,10 +13,16 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --if-present typecheck",
     "cdk": "pnpm --filter @ever/infra exec cdk",
+    "photon:check": "pnpm --filter @ever/gateway photon:check",
     "seed": "tsx seed/seed.ts",
     "demo:reset": "tsx scripts/reset-demo.ts",
+    "scrub": "tsx scripts/scrub-needs.ts",
     "demo:shutoff": "tsx scripts/trigger-shutoff.ts",
-    "demo:chaos": "tsx scripts/toggle-chaos.ts"
+    "demo:chaos": "tsx scripts/toggle-chaos.ts",
+    "build:worker": "esbuild packages/worker/src/handler.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/worker/index.js && cd dist/worker && rm -f ../worker.zip && zip -q ../worker.zip index.js && echo built dist/worker.zip",
+    "build:gateway": "esbuild packages/gateway/src/index.ts --bundle --platform=node --target=node22 --format=esm --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\" --outfile=dist/gateway.mjs && echo built dist/gateway.mjs",
+    "gateway:start": "pnpm --filter @ever/gateway start",
+    "build:api": "esbuild packages/api/src/handler.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/api/index.js && cd dist/api && rm -f ../api.zip && zip -q ../api.zip index.js && echo built dist/api.zip"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

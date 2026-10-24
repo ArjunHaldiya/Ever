@@ -1,7 +1,34 @@
+import { InboundMessageSchema, logEvent } from "@ever/core";
+import { buildDeps } from "./aws";
+import { processInbound, type WorkerDeps } from "./process";
+
 /**
- * PLACEHOLDER until Phase 4. Fails on purpose so a message that arrives before
- * the real worker exists is retried and lands in the DLQ rather than being lost.
+ * Lambda entry point (SQS event source, batch size 1). A record that can't be parsed or
+ * processed throws, so SQS retries it and, after 3 receives, moves it to the DLQ.
  */
-export async function handler(): Promise<never> {
-  throw new Error("worker not implemented yet (Phase 4)");
+
+type SqsEvent = { Records: { messageId: string; body: string }[] };
+
+let depsPromise: Promise<WorkerDeps> | undefined;
+
+function getDeps(): Promise<WorkerDeps> {
+  depsPromise ??= buildDeps().catch((err) => {
+    depsPromise = undefined; // let the next invocation try again
+    throw err;
+  });
+  return depsPromise;
+}
+
+export async function handler(event: SqsEvent): Promise<void> {
+  const deps = await getDeps();
+  for (const record of event.Records) {
+    let message;
+    try {
+      message = InboundMessageSchema.parse(JSON.parse(record.body));
+    } catch {
+      logEvent("poison_message", { sqsMessageId: record.messageId });
+      throw new Error("Unparseable inbound message");
+    }
+    await processInbound(deps, message);
+  }
 }

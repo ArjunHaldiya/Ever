@@ -24,6 +24,11 @@ export const AI_MODES = ["primary", "degraded"] as const;
 /** Which path actually served a request (stored on the Needs row). */
 export const PROCESSING_MODES = ["ai", "degraded"] as const;
 
+/** Which extractor produced a need. Shown on the dashboard so Bedrock's work is visible. */
+export const EXTRACTORS = ["bedrock", "rules"] as const;
+/** Why Bedrock was skipped or abandoned for a request. */
+export const FALLBACK_REASONS = ["chaos", "no_model", "timeout", "error", "parse_failed"] as const;
+
 export const TierSchema = z.enum(TIERS);
 export const NeedTypeSchema = z.enum(NEED_TYPES);
 export const LanguageSchema = z.enum(LANGUAGES);
@@ -41,6 +46,14 @@ export const ExtractedNeedSchema = z.object({
   language: LanguageSchema,
   /** 0..1; below 0.5 means ask a clarifying question. */
   confidence: z.number().min(0).max(1),
+});
+
+export const ExtractionMetaSchema = z.object({
+  extractor: z.enum(EXTRACTORS),
+  /** Bedrock model that answered; null when the rules extractor ran. */
+  modelId: z.string().nullable(),
+  latencyMs: z.number().int().nonnegative(),
+  fallbackReason: z.enum(FALLBACK_REASONS).nullable(),
 });
 
 export const ResourceSchema = z.object({
@@ -87,6 +100,49 @@ export const InboundMessageSchema = z.object({
   receivedAt: z.string().datetime(),
   provider: z.string().min(1),
 });
+
+/**
+ * Body of each message on the outbound queue (worker -> gateway -> Photon).
+ * `texts` are sent in order; one SQS message keeps a 911 line ahead of the answer.
+ * `to` is the provider handle and must never be logged.
+ */
+export const OutboundMessageSchema = z.object({
+  to: z.string().min(1),
+  texts: z.array(z.string().min(1)).min(1).max(5),
+  needId: z.string().optional(),
+  kind: z.enum(["reply", "warning"]),
+  /** Set on warnings so the gateway can record sent / delivered / read against the right alert. */
+  alertId: z.string().optional(),
+  phoneHash: z.string().optional(),
+});
+
+/** One resident's warning, as stored in the Alerts table (key: alertId + phoneHash). */
+export const AlertRecordSchema = z.object({
+  alertId: z.string(),
+  phoneHash: z.string(),
+  zip: z.string(),
+  /** ISO 8601 */
+  shutoffAt: z.string(),
+  /** Masked label for display, e.g. "***1234". The number itself is never returned to the dashboard. */
+  label: z.string(),
+  createdAt: z.string(),
+  sentAt: z.string().nullable().optional(),
+  deliveredAt: z.string().nullable().optional(),
+  readAt: z.string().nullable().optional(),
+  /** Photon id of the warning message, used to match delivery checks and read receipts. */
+  messageId: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+});
+
+/** Add an opted-in resident from the dashboard. `phone` is normalized to E.164 on the server. */
+export const AddResidentBodySchema = z.object({
+  phone: z.string().min(7).max(32),
+  zip: z.string().regex(/^\d{5}$/, "zip must be 5 digits"),
+  needType: NeedTypeSchema.exclude(["info"]),
+  firstName: z.string().trim().max(40).optional(),
+});
+
+export const RemoveResidentBodySchema = z.object({ phoneHash: z.string().min(1) });
 
 export const ChaosBodySchema = z.object({ mode: AiModeSchema });
 

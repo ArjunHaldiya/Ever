@@ -1,3 +1,5 @@
 packages:
   - "packages/*"
   - "infra"
+  - "seed"
+  - "scripts"

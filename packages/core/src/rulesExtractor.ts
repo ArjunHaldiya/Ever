@@ -121,15 +121,25 @@ const PLACE_RE =/\b(?:near|around|close to|by|at)\s+([A-Za-z0-9][A-Za-z0-9 .'&/-
 const NOT_A_PLACE_RE =
   /^(?:me|here|there|home|work|my (?:house|home|place|apartment|location|work)|the moment|tonight|today|tomorrow|now|night|noon|\d{1,2} ?(?:am|pm))$/i;
 
+/** ", San Francisco" / ", Oakland CA" right after a street or intersection: needed to place it nationwide. */
+const TRAILING_CITY_RE = /^,\s*([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,2})(?:,?\s*([A-Z]{2})\b)?/;
+
+function withTrailingCity(found: string, match: RegExpExecArray): string {
+  const tail = match.input.slice(match.index + match[0].length);
+  const city = TRAILING_CITY_RE.exec(tail);
+  return city ? `${found}, ${city[1]}${city[2] ? `, ${city[2]}` : ""}` : found;
+}
+
 /** Pull a location out of the message: ZIP, street address, cross streets, or a "near X" phrase. */
 export function extractLocationText(text: string): string | null {
   const zip = extractZip(text);
   if (zip) return zip;
   const address = ADDRESS_RE.exec(text);
-  if (address?.[1]) return address[1].trim();
+  if (address?.[1]) return withTrailingCity(address[1].trim(), address);
   const cross = CROSS_STREETS_RE.exec(text);
   if (cross?.[1] && cross[2]) {
-    return `${cross[1].replace(LEADING_FILLER_RE, "").trim()} and ${cross[2].trim()}`;
+    const found = `${cross[1].replace(LEADING_FILLER_RE, "").trim()} and ${cross[2].trim()}`;
+    return withTrailingCity(found, cross);
   }
   const place = PLACE_RE.exec(text)?.[1]?.trim();
   if (place && place.split(/\s+/).length <= 6 && !NOT_A_PLACE_RE.test(place)) return place;

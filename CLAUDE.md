@@ -12,7 +12,7 @@ EVER is an AI help line that keeps working during power outages. People text (or
 
 ### It is
 1. A text/call help line that turns a plain-language request into a routed answer with a one-line reason.
-2. A shutoff-warning system with delivered/read tracking.
+2. A shutoff-warning system that texts opted-in residents and shows how many were sent.
 3. A responder dashboard (live map of needs, resource capacity, warning status, queue backlog).
 4. Resilient by design: queue-first, with a degraded mode that needs no AI.
 
@@ -26,7 +26,7 @@ EVER is an AI help line that keeps working during power outages. People text (or
 Three moments. Every task should serve one of them; nothing may break them.
 
 1. **Judge gets help on their own phone.** Scan QR, enter number, we message first, they describe a need, they get routed in seconds.
-2. **Warning lands, and we prove it.** Trigger a shutoff for a demo ZIP; a phone buzzes; dashboard flips that resident `sent → delivered → read` live.
+2. **Warning lands, and we prove it.** Trigger a shutoff for a demo ZIP; a phone buzzes; dashboard shows how many opted-in residents it was sent to. (Delivered/read tracking was cut: it never flipped in real tests.)
 3. **We break it on purpose.** Chaos toggle cuts the AI path; replies continue in degraded mode and say so; on restore, the queued backlog drains on screen.
 
 ## Architecture
@@ -71,7 +71,7 @@ Photon's webhook handler runs **after** the HTTP response is sent (fire-and-forg
 | Worker | Lambda, SQS event source, batch size 1 |
 | AI | Bedrock Converse API with tool use; model from `BEDROCK_MODEL_ID` (fast tier, e.g. a Haiku-class or Nova model) |
 | Geocoding | Amazon Location Service; fallback to seeded ZIP-centroid table |
-| PII | Amazon Comprehend `DetectPiiEntities` before storing message text |
+| PII | None stored: message text, location and ZIP are used to answer, then discarded (see FR-7) |
 | Data | DynamoDB (on-demand) |
 | Chaos flag | SSM Parameter Store `/app/ai_mode` = `primary` \| `degraded` |
 | Infra | AWS CDK (TypeScript) |
@@ -108,16 +108,16 @@ Put all business logic in `packages/core` as pure functions so it is testable wi
 | FR-4 | Resolve location from the message; if missing, ask once ("What's your ZIP or nearest cross streets?") and hold state |
 | FR-5 | Reply with nearest open, powered resource that fits: name, address, distance, hours, what to bring |
 | FR-6 | One-line reason with every answer ("Chosen: has a generator and fridge space") |
-| FR-7 | Redact PII before storing; store location rounded to ~3 decimal places |
+| FR-7 | Data minimization: never store message text, location, ZIP, or the chosen place/distance. A Need keeps only tier, needType, status, mode and timestamps |
 | FR-8 | Dashboard map of live needs colored by tier, plus resources with remaining capacity |
 | FR-9 | Degraded mode when chaos flag is on, Bedrock errors, or Bedrock takes >4s; replies say "Running in backup mode" |
 | FR-10 | Every request goes through SQS; dashboard shows queue depth and backlog draining on recovery |
 | FR-11 | Dashboard form: ZIP + shutoff time → message every opted-in resident in that ZIP |
-| FR-12 | Track warning status per resident `sent → delivered → read` via Photon read receipts; live on dashboard |
+| FR-12 | Show how many opted-in residents a warning was sent to, live on dashboard. (Delivered/read tracking was cut: it never recorded in real tests.) |
 | FR-13 | Idempotency: record Photon `message.id` (24h TTL) and skip duplicates |
 
 ### P1 — if time allows
-- FR-14 Opt-in by text: `JOIN <zip> <need>`; `STOP` to leave
+- FR-14 Opt-in by text: `JOIN <zip> <need>` (not built); `STOP` to leave (built: worker removes the resident's phone and ZIP, keeps only an `optedIn: false` marker)
 - FR-15 Decrement capacity on routing; update the iMessage resource card in place
 - FR-16 Shortfall alert when demand in a ZIP exceeds open capacity
 - FR-17 Time-to-resource metric on dashboard
@@ -141,7 +141,7 @@ Put all business logic in `packages/core` as pure functions so it is testable wi
 | Table | PK / SK | Fields |
 |---|---|---|
 | `Resources` | `id` | name, type, lat, lng, address, hasPower, capacity, capacityUnit, hours, supports[] |
-| `Needs` | `id` | tier, needType, latRounded, lngRounded, zip, status (`new`/`routed`/`awaiting_location`/`failed`), resourceId, mode (`ai`/`degraded`), redactedText, createdAt, routedAt |
+| `Needs` | `id` | tier, needType, status (`new`/`routed`/`awaiting_location`/`failed`), mode (`ai`/`degraded`), extractor/model metadata, unverifiedShown, createdAt, routedAt. No location, ZIP, text, place or distance |
 | `Residents` | `phoneHash` | zip, needType, optedIn, phone (opted-in only) |
 | `Alerts` | `alertId` / `phoneHash` | zip, shutoffAt, sentAt, deliveredAt, readAt |
 | `Conversations` | `phoneHash` | pending question, last needId, ttl |
@@ -168,7 +168,7 @@ type ExtractedNeed = {
 
 ## Environment variables
 ```
-AWS_REGION=us-west-2
+AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=
 QUEUE_URL=
 DLQ_URL=
@@ -209,7 +209,7 @@ pnpm cdk deploy
 4. Gateway with Photon: real iMessage in → SQS → worker → reply. **Test an Android number in this step** and record the result here.
 5. Bedrock extractor with 4s timeout + fallback.
 6. Dashboard API + dashboard (map, needs, capacity, queue depth, chaos toggle).
-7. Shutoff warnings + read receipts.
+7. Shutoff warnings (sent count).
 8. Freeze at 8 AM Sat: stability, cached demo responses, backup video.
 
 ## Conventions
